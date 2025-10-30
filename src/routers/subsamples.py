@@ -249,6 +249,9 @@ def delete_subsample(
         case SubSampleStateEnum.MULTIPLES_GENERATION_FAILED:
             result = remove_multiples_dir(modern_fs, sample_name, subsample_name)
             message = f"Thumbs directory for subsample {subsample_name} {result}"
+        case SubSampleStateEnum.SEPARATION_VALIDATION_DONE:
+            result = remove_separation_done(modern_fs, sample_name, subsample_name)
+            message = f"Zip for subsample {subsample_name} {result}"
         case SubSampleStateEnum.UPLOAD_FAILED:
             result = remove_upload_zip(modern_fs, sample_name, subsample_name)
             message = f"Zip for subsample {subsample_name} {result}"
@@ -334,6 +337,31 @@ def remove_upload_zip(
     return result
 
 
+def remove_separation_done(
+    modern_fs: ModernScanFileSystem, sample_name: str, subsample_name: str
+) -> str:
+    sep_done_file = modern_fs.SEP_validated_file_path
+    try:
+        if sep_done_file.exists():
+            sep_done_file.unlink()
+            logger.info(
+                f"Deleted separation done file for subsample {subsample_name} in sample {sample_name}: {sep_done_file}"
+            )
+            result = "deleted"
+        else:
+            logger.info(
+                f"No separation done file found to delete for subsample {subsample_name} in sample {sample_name}: {sep_done_file}"
+            )
+            result = "not_found"
+    except Exception as e:
+        logger.error(
+            f"Error deleting separation done file for subsample {subsample_name} in sample {sample_name}: {e}"
+        )
+        result = "?"
+        raise_500(str(e))
+    return result
+
+
 @router.post("/{subsample_hash}/process")
 def process_subsample(
     project_hash: str,
@@ -366,13 +394,11 @@ def process_subsample(
     modern_fs = ModernScanFileSystem(zoo_project, sample_name, subsample_name)
     state = modern_subsample_state(zoo_project, sample_name, subsample_name, modern_fs)
     to_launch: Job | None = None
-    # noinspection PyTypeChecker
     job_state: Callable[[Job], bool] = Job.will_do
     match state:
         case SubSampleStateEnum.ACQUIRED | SubSampleStateEnum.SEGMENTATION_FAILED:
             to_launch = FreshScanToVignettes(zoo_project, sample_name, subsample_name)
             if state == SubSampleStateEnum.SEGMENTATION_FAILED:
-                # noinspection PyTypeChecker
                 job_state = Job.is_in_error
         case (
             SubSampleStateEnum.MSK_APPROVED
@@ -382,7 +408,6 @@ def process_subsample(
                 zoo_project, sample_name, subsample_name
             )
             if state == SubSampleStateEnum.MULTIPLES_GENERATION_FAILED:
-                # noinspection PyTypeChecker
                 job_state = Job.is_in_error
         case (
             SubSampleStateEnum.SEPARATION_VALIDATION_DONE
@@ -392,8 +417,12 @@ def process_subsample(
                 zoo_project, sample_name, subsample_name, ecotaxa_token
             )
             if state == SubSampleStateEnum.UPLOAD_FAILED:
-                # noinspection PyTypeChecker
                 job_state = Job.is_in_error
+        case SubSampleStateEnum.UPLOADED:
+            to_launch = VerifiedSeparationToEcoTaxa(
+                zoo_project, sample_name, subsample_name, ecotaxa_token
+            )
+            job_state = Job.is_done
 
     ret: Job | None = None
     if to_launch is not None:
@@ -403,7 +432,7 @@ def process_subsample(
                 JobScheduler.submit(to_launch)
                 ret = to_launch
             else:
-                ret = there_tasks[-1]
+                ret = there_tasks[0]  # Most recent first
     return ProcessRsp(task=job_to_task_rsp(ret))
 
 

@@ -95,6 +95,7 @@ class VignettesToAutoSeparated(Job):
                 f"Processed {processed}/{to_process} images - ETA: {eta_str}"
             )
 
+        self.logger.info(f"Processed all {to_process} images")
         # Add some marker that all went fine
         self.modern_fs.mark_ML_separation_done()
 

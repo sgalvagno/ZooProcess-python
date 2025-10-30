@@ -1,4 +1,5 @@
 import pytest
+import time
 
 from modern.tasks import JobScheduler, Job
 
@@ -89,3 +90,23 @@ def test_find_job_different_class(clear_jobs):
 
     # Assert that no job is found
     assert len(found_job) == 0
+
+
+def test_find_job_returns_most_recent_first(clear_jobs):
+    # Submit two jobs with the same class and params at different times
+    job1 = FakeTestJob(param1="value1", param2="value2")
+    JobScheduler.submit(job1)
+    # Ensure a different creation time for the next job
+    time.sleep(0.05)
+    job2 = FakeTestJob(param1="value1", param2="value2")
+    JobScheduler.submit(job2)
+
+    # Create a probe job with the same params
+    probe = FakeTestJob(param1="value1", param2="value2")
+
+    # Find matching jobs; expected order is most recent first
+    found_jobs = JobScheduler.find_jobs_like(probe, Job.will_do)
+
+    assert len(found_jobs) == 2
+    assert found_jobs[0].job_id == job2.job_id
+    assert found_jobs[1].job_id == job1.job_id

@@ -35,7 +35,6 @@ class EcoTaxaApiClient(SimpleClient):
         self.token: str = token
 
     def login(self):
-        self.logger.info(f"Logging in to EcoTaxa at {self.base_url}")
         req = LoginReq(username=self.email, password=self.password)
         try:
             rsp = self.post(str, "/login", json=req)
@@ -51,7 +50,6 @@ class EcoTaxaApiClient(SimpleClient):
         return rsp
 
     def wait_for_job_done(self, job_id: int) -> JobModel:
-        self.logger.info("Waiting for job #%d", job_id)
         while True:
             try:
                 rsp: JobModel = self.get(JobModel, "/jobs/%d/" % job_id)

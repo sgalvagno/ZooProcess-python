@@ -151,7 +151,6 @@ class JobRunner(Thread):
             return
         try:
             job.run()
-            job.logger.info("Processing completed successfully")
             job.state = JobStateEnum.Finished
             job.mark_done(logger)
         except Exception as e:

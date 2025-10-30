@@ -4,7 +4,7 @@ import shutil
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 import cv2
 
@@ -184,12 +184,17 @@ class VerifiedSeparationToEcoTaxa(Job):
         job_id = self.adaptative_upload(
             tsv_file_path, client, dest_user_dir, dst_project_id
         )
-        self.logger.info(f"Waiting for job {job_id}")
+        self.logger.info(f"Waiting for EcoTaxa task #{job_id}")
         final_job_state = client.wait_for_job_done(job_id)
         if final_job_state.state != "F":
             assert final_job_state.errors is not None
-            assert False, "Job failed:" + "\n".join(final_job_state.errors)
+            assert False, f"EcoTaxa task #{job_id} failed:" + "\n".join(
+                final_job_state.errors
+            )
 
+        self.logger.info(
+            f"EcoTaxa task #{job_id} done. Data is in https://ecotaxa.obs-vlfr.fr/prj/{dst_project_id}"
+        )
         self.modern_fs.mark_upload_done(datetime.now())
 
     def adaptative_upload(
@@ -215,53 +220,67 @@ class VerifiedSeparationToEcoTaxa(Job):
         # Get all acquisitions for project
         all_acqs: List[AcquisitionModel] = client.list_acquisitions(dst_project_id)
         target_acq = next((acq for acq in all_acqs if acq.orig_id == acq_orig_id), None)
-        import_update = ""
         if target_acq is not None:
-            self.logger.info(f"Reading EcoTaxa objects")
-            # We might have some objects in there
-            objects_for_acq = client.query_acquisition_object_set(
-                prj=dst_project_id,
-                sample_id=target_acq.acq_sample_id,
-                acq_id=target_acq.acquisid,
+            import_update, skip_existing = self.check_previous_acquisition(
+                client, dst_project_id, target_acq, tsv_file_path
             )
-            if len(objects_for_acq) == 0:
-                pass  # Empty previous acq
-            else:
-                objects_in_tsv = read_ecotaxa_tsv(tsv_file_path, {"object_id": str})
-                nb_objects_in_tsv = len(objects_in_tsv)
-                nb_objects_in_acq = len(objects_for_acq)
-                obj_ids = "\n".join([str(obj["objid"]) for obj in objects_for_acq])
-                if nb_objects_in_tsv != nb_objects_in_acq:
-                    raise Exception(
-                        f"EcoTaxa has {nb_objects_in_acq} objects in this acquisition while {nb_objects_in_tsv} should be uploaded."
-                        f"Please cleanup on EcoTaxa side before retrying. Object IDs: {obj_ids}"
-                    )
-                else:
-                    orig_ids_acq = set(
-                        [an_obj["orig_id"] for an_obj in objects_for_acq]
-                    )
-                    orig_ids_tsv = set(
-                        [an_obj["object_id"] for an_obj in objects_in_tsv]
-                    )
-                    if orig_ids_acq == orig_ids_tsv:
-                        import_update = "Yes"
-                    else:
-                        raise Exception(
-                            f"EcoTaxa has different objects in this acquisition."
-                            f"Please cleanup on EcoTaxa side before retrying. Object IDs: {obj_ids}"
-                        )
         else:
             # No previous acq
-            pass
+            import_update, skip_existing = "", False
         # Start an import task with the file
         self.logger.info(f"Starting EcoTaxa import")
         job_id = client.import_my_file_into_project(
             dst_project_id,
             dest_user_dir,
-            skip_existing_objects=import_update != "",
+            skip_existing_objects=skip_existing,
             update_mode=import_update,
         )
         return job_id
+
+    def check_previous_acquisition(
+        self,
+        client: EcoTaxaApiClient,
+        dst_project_id: int,
+        target_acq: AcquisitionModel,
+        tsv_file_path: Path,
+    ) -> Tuple[str, bool]:
+        self.logger.info(f"Reading EcoTaxa objects")
+        # We might have some objects in there
+        objects_for_acq = client.query_acquisition_object_set(
+            prj=dst_project_id,
+            sample_id=target_acq.acq_sample_id,
+            acq_id=target_acq.acquisid,
+        )
+        if len(objects_for_acq) == 0:
+            return "", False  # Empty previous acq
+        # Remote (EcoTaxa) side objects
+        orig_ids_acq = set([an_obj["orig_id"] for an_obj in objects_for_acq])
+        obj_ids_by_orig_id = {
+            obj["orig_id"]: int(obj["objid"]) for obj in objects_for_acq
+        }
+        # Local objects
+        objects_in_tsv = read_ecotaxa_tsv(tsv_file_path, {"object_id": str})
+        orig_ids_tsv = set([an_obj["object_id"] for an_obj in objects_in_tsv])
+        # Compare
+        if orig_ids_acq == orig_ids_tsv:
+            return "Yes", True  # same objects, update metadata
+        extra_in_ecotaxa = orig_ids_acq - orig_ids_tsv
+        if len(extra_in_ecotaxa) > 0:
+            # More in EcoTaxa than here. Some separation disappeared.
+            extra_obj_ids = [
+                obj_ids_by_orig_id[an_orig_id] for an_orig_id in extra_in_ecotaxa
+            ]
+            extra_obj_ids.sort()
+            msg_obj_ids = "\n".join(str(obj_id) for obj_id in extra_obj_ids)
+            raise Exception(
+                f"EcoTaxa project has extra objects in this acquisition."
+                f"Please delete on EcoTaxa side before retrying. Link: https://ecotaxa.obs-vlfr.fr/gui/prj/purge/{dst_project_id} Object IDs: {msg_obj_ids}"
+            )
+        extra_in_tsv = orig_ids_tsv - orig_ids_acq
+        if len(extra_in_tsv) > 0:
+            # More here than in EcoTaxa than here. Some separation appeared.
+            return "", True
+        return "", False
 
     def log_image_diffs(self, before_cuts, after_cuts):
         """

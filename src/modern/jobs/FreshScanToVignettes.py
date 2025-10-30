@@ -104,6 +104,7 @@ class FreshScanToVignettes(Job):
         maybe_multiples, error = classify_all_images_from(
             self.logger, cut_dir, self.scores_file, 0.4
         )
+        self.logger.info(f"Found {len(maybe_multiples)} multiples")
         assert error is None, error
 
     def _cleanup_work(self):
