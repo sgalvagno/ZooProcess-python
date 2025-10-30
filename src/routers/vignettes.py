@@ -20,6 +20,7 @@ from ZooProcess_lib.img_tools import (
     save_jpg_or_png_image,
     borders_of_original,
 )
+from helpers.auth import get_current_user_from_credentials
 from helpers.logger import logger
 from helpers.matrix import (
     save_matrix_as_gzip,
@@ -30,6 +31,7 @@ from helpers.web import get_stream, raise_422, raise_500
 from img_proc.drawing import apply_matrix_onto
 from legacy.ids import measure_file_name
 from local_DB.db_dependencies import get_db
+from local_DB.models import User
 from modern.filesystem import (
     ModernScanFileSystem,
     V10_THUMBS_TO_CHECK_SUBDIR,
@@ -69,7 +71,9 @@ def processing_context(
     """
     scan_name = scan_name_from_subsample_name(subsample_name)
 
-    logger.info(f"{zoo_project}, {sample_name}, {subsample_name}, {scan_name}")
+    logger.info(
+        f"Context: {zoo_project.name}, {sample_name}, {subsample_name}, {scan_name}"
+    )
     processor = Processor.from_legacy_config(
         zoo_project.zooscan_config.read(),
         zoo_project.zooscan_config.read_lut(),
@@ -296,6 +300,7 @@ async def update_a_vignette_mask(
     subsample_hash: str,
     img_path: str,
     file: UploadFile = File(...),
+    user: User = Depends(get_current_user_from_credentials),
     db: Session = Depends(get_db),
 ) -> dict:
     """Update a vignette using the drawn mask
@@ -306,13 +311,14 @@ async def update_a_vignette_mask(
         subsample_hash (str): The hash of the subsample
         img_path (str): The path to the original image
         file (UploadFile): The uploaded file containing the mask
+        user (User): The user posting the mask
         db (Session): Database session
 
     Returns:
         dict: Status of the update operation
     """
     logger.info(
-        f"update_a_vignette_mask: {project_hash}/{sample_hash}/{subsample_hash}/{img_path}"
+        f"update_a_vignette_mask ({user.name}): {project_hash}/{sample_hash}/{subsample_hash}/{img_path}"
     )
     # Validate the project, sample, and subsample hashes
     zoo_drive, zoo_project, sample_name, subsample_name = validate_path_components(
@@ -352,18 +358,26 @@ async def update_a_vignette_mask(
     }
 
 
-DRAWING_FEATURES = {"object_bx", "object_by", "object_width", "object_height",
-                    "object_x", "object_y", "object_major", "object_minor", "object_angle",
-                    "object_xstart", "object_ystart"}
+DRAWING_FEATURES = {
+    "object_bx",
+    "object_by",
+    "object_width",
+    "object_height",
+    "object_xstart",
+    "object_ystart",
+}
 
 
-@router.post("/vignette_mask_maybe/{project_hash}/{sample_hash}/{subsample_hash}/{img_path}")
+@router.post(
+    "/vignette_mask_maybe/{project_hash}/{sample_hash}/{subsample_hash}/{img_path}"
+)
 async def simulate_a_vignette_mask(
     project_hash: str,
     sample_hash: str,
     subsample_hash: str,
     img_path: str,
     file: UploadFile = File(...),
+    user: User = Depends(get_current_user_from_credentials),
     db: Session = Depends(get_db),
 ) -> dict:
     """Update _virtually_ a vignette using the drawn mask
@@ -374,13 +388,14 @@ async def simulate_a_vignette_mask(
         subsample_hash (str): The hash of the subsample
         img_path (str): The path to the original image
         file (UploadFile): The uploaded file containing the mask
+        user (User): The user posting the mask
         db (Session): Database session
 
     Returns:
         dict: Status of the simulation operation
     """
     logger.info(
-        f"simulate_a_vignette_mask: {project_hash}/{sample_hash}/{subsample_hash}/{img_path}"
+        f"simulate_a_vignette_mask ({user.name}): {project_hash}/{sample_hash}/{subsample_hash}/{img_path}"
     )
     # Validate the project, sample, and subsample hashes
     zoo_drive, zoo_project, sample_name, subsample_name = validate_path_components(
@@ -411,8 +426,9 @@ async def simulate_a_vignette_mask(
     rois, _ = processor.segmenter.find_ROIs_in_cropped_image(
         masked_img, processor.config.resolution
     )
-    calcs = processor.calculator.ecotaxa_measures_list_from_roi_list(masked_img, processor.config.resolution, rois,
-                                                                     DRAWING_FEATURES)
+    calcs = processor.calculator.ecotaxa_measures_list_from_roi_list(
+        masked_img, processor.config.resolution, rois, DRAWING_FEATURES
+    )
     return {
         "status": "success",
         "rois": calcs,
@@ -440,7 +456,9 @@ def segment_mask_file(
     return segment_mask_image(processor, sep_img)
 
 
-def segment_mask_image(processor: Processor, sep_img: np.ndarray) -> Tuple[np.ndarray, List[ROI]]:
+def segment_mask_image(
+    processor: Processor, sep_img: np.ndarray
+) -> Tuple[np.ndarray, List[ROI]]:
     sep_img2 = cv2.extractChannel(sep_img, 1)
     sep_img2[sep_img[:, :, 2] == BGR_RED_COLOR[2]] = 255
     assert processor.config is not None

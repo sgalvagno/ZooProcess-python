@@ -278,7 +278,7 @@ class VerifiedSeparationToEcoTaxa(Job):
             )
         extra_in_tsv = orig_ids_tsv - orig_ids_acq
         if len(extra_in_tsv) > 0:
-            # More here than in EcoTaxa than here. Some separation appeared.
+            # More here than in EcoTaxa. Some separation appeared.
             return "", True
         return "", False
 

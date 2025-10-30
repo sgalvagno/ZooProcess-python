@@ -251,7 +251,7 @@ def delete_subsample(
             message = f"Thumbs directory for subsample {subsample_name} {result}"
         case SubSampleStateEnum.SEPARATION_VALIDATION_DONE:
             result = remove_separation_done(modern_fs, sample_name, subsample_name)
-            message = f"Zip for subsample {subsample_name} {result}"
+            message = f"Separation done file subsample {subsample_name} {result}"
         case SubSampleStateEnum.UPLOAD_FAILED:
             result = remove_upload_zip(modern_fs, sample_name, subsample_name)
             message = f"Zip for subsample {subsample_name} {result}"

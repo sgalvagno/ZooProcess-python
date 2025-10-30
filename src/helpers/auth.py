@@ -347,7 +347,7 @@ async def get_current_user_from_credentials(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
-):
+) -> User:
     """
     FastAPI dependency that extracts and validates the user from credentials.
 
