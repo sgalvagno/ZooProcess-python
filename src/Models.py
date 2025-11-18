@@ -217,20 +217,36 @@ class ScanTypeEnum(str, Enum):
     V10_MASK = "V10MASK"
 
 
+class ScanDetailEnum(str, Enum):
+    untouched = "untouched"
+    created = "created"
+    modified = "modified"
+    cleared = "cleared"
+
+
+class ScanStatsDetail(BaseModel):
+    image: str  # Image name e.g. m158_mn19_n5_d2_1_xE2By2D30w64h54.png
+    score: float  # ML classifier output for this image
+    state: ScanDetailEnum
+
+
 class ScanStats(BaseModel):
     name: str
     # Number of images output by segmenter, sent to ML classifier
     segmented: int
+    # Number of too large images
+    tooBig: int
     # Number of images sent to ML separator, i.e., with ML classifier score > 0.4 and not too large
     sentToSeparator: int
     # Number of ML-separated images not modified by users
     untouchedByUser: int
-    # Number of images modified by users but never sent to ML separator
-    addedByUser: int
-    # Number of (re-)separated images modified by users (but not cleared)
-    separatedByUser: int
-    # Number of (re-)separated images cleared by users
+    # User added a separation from scratch
+    createdByUser: int
+    # User modified the ML-proposed separation (but did not clear it)
+    modifiedByUser: int
+    # User cleared the ML-proposed separation
     clearedByUser: int
+    details: List["ScanStatsDetail"]
 
 
 class ScanPostRsp(BaseModel):

@@ -1,7 +1,8 @@
 import json
+import os
 import tempfile
 from pathlib import Path
-from typing import List
+from typing import List, cast, Dict
 
 import cv2
 import numpy as np
@@ -9,7 +10,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from Models import Project, Background, Scan, ScanStats
+from Models import Project, Background, Scan, ScanStats, ScanStatsDetail, ScanDetailEnum
 from ZooProcess_lib.ZooscanFolder import ZooscanDrive
 from ZooProcess_lib.img_tools import load_image
 from config_rdr import config
@@ -28,7 +29,12 @@ from modern.from_legacy import (
     DEPTH_ALL,
 )
 from modern.ids import subsample_name_from_scan_name
-from providers.ML_multiple_separator import RGB_RED_COLOR, BGR_RED_COLOR
+from modern.jobs import MIN_SCORE, BIG_IMAGE_THRESHOLD
+from providers.ImageList import ImageList
+from providers.ML_multiple_separator import (
+    BGR_RED_COLOR,
+    separate_all_images_from,
+)
 from remote.DB import DB
 from .utils import validate_path_components
 
@@ -193,7 +199,7 @@ def get_project_scanning_stats(
 
     def has_a_separator(image_path: Path) -> bool:
         sep_img = load_image(image_path, cv2.IMREAD_COLOR_BGR)
-        return np.any(np.all(sep_img == BGR_RED_COLOR, axis=2))
+        return cast(bool, np.any(np.all(sep_img == BGR_RED_COLOR, axis=2)))
 
     v10_work_dir: Path = zoo_project.zooscan_scan.path / TOP_V10_DIR
     if not v10_work_dir.exists():
@@ -206,32 +212,111 @@ def get_project_scanning_stats(
         nb_subdirs += 1 if modern_fs.multiples_vis_dir.exists() else 0
         if nb_subdirs != 2:
             continue
-        # ...and the flag that manual separation is finished
+        # ...and the flag indicating that manual separation is finished
         if not modern_fs.SEP_validated_file_path.exists():
             continue
+
+        # Stats for what happened before ML separation
         after_seg = len(files_in_dir(modern_fs.cut_dir))
         with open(modern_fs.scores_file_path, "r") as f:
-            scores = json.load(f)
-        sent_to_ml_separator = {k: v for k, v in scores.items() if v > 0.4}
+            scores: Dict[str, float] = json.load(f)
+        sent_to_ml_separator = {k: v for k, v in scores.items() if v > MIN_SCORE}
+
+        # Big images were filtered but forced into this directory
+        sep_images_list = ImageList(modern_fs.multiples_vis_dir)
+        zip_path = sep_images_list.zipped(logger)  # Just to store sizes
+        os.unlink(zip_path)
+        big_ones = {
+            f
+            for (f, sz) in sep_images_list.size_by_name.items()
+            if sz >= BIG_IMAGE_THRESHOLD
+        }
+        for big in big_ones:
+            try:
+                del sent_to_ml_separator[big]
+            except KeyError:
+                pass
 
         # Separation work directory. Written into by ML or user
         in_sep_dir = files_in_dir(modern_fs.multiples_vis_dir)
-        # Writes of images in work dir
+
+        # Writes which happened after the end of the separation job -> user modifications
         auto_sep_log = modern_fs.ensure_meta_dir() / "auto_sep_job.log"
         modified_images = [f for f in in_sep_dir if is_after(f, auto_sep_log)]
         modified_images_names = [f.name for f in modified_images]
-        # Images added by user but the ML classifier did not see them
-        added_by_user = set(modified_images_names).difference(sent_to_ml_separator)
-        # Writes of a separator-less image
-        cleared_images = [f for f in modified_images if not has_a_separator(f)]
+        unmodified_images = [f for f in in_sep_dir if not is_after(f, auto_sep_log)]
+        unmodified_images_names = [f.name for f in unmodified_images]
+
+        # Images added by user but the ML separator did not even see them
+        added_by_user = set(modified_images_names).difference(
+            sent_to_ml_separator.keys()
+        )
+        # Keep only the ones with separators
+        created_by_user = {
+            f for f in added_by_user if has_a_separator(modern_fs.multiples_vis_dir / f)
+        }
+
+        to_separate = modified_images_names.copy()
+        for added in added_by_user:
+            to_separate.remove(added)
+        # Re-separate original images
+        to_separate_list = ImageList(modern_fs.cut_dir, to_separate)
+        results, error = separate_all_images_from(logger, to_separate_list)
+        assert error is None, error
+        assert results is not None
+        predictions = results.predictions
+        modified_by_user = set()
+        cleared_by_user = set()
+        for a_prediction in predictions:
+            coords = a_prediction.separation_coordinates
+            ml_separated = len(coords[0]) != 0
+            user_separated = has_a_separator(
+                modern_fs.multiples_vis_dir / a_prediction.name
+            )
+            if ml_separated:
+                if user_separated:
+                    modified_by_user.add(a_prediction.name)
+                else:
+                    cleared_by_user.add(a_prediction.name)
+            else:
+                if user_separated:
+                    created_by_user.add(a_prediction.name)
+                else:
+                    # Ignored: ML found no sep and the user did not fix
+                    pass
+
+        details: List[ScanStatsDetail] = []
+        for qualif, state in zip(
+            [
+                unmodified_images_names,
+                created_by_user,
+                modified_by_user,
+                cleared_by_user,
+            ],
+            [
+                ScanDetailEnum.untouched,
+                ScanDetailEnum.created,
+                ScanDetailEnum.modified,
+                ScanDetailEnum.cleared,
+            ],
+        ):
+            details.extend(
+                [
+                    ScanStatsDetail(image=f, score=scores.get(f, -1), state=state)
+                    for f in qualif
+                ]
+            )
+        details.sort(key=lambda x: x.image, reverse=True)
         stats_for_scan = ScanStats(
             name=subsample,
             segmented=after_seg,
+            tooBig=len(big_ones),
             sentToSeparator=len(sent_to_ml_separator),
-            untouchedByUser=len(in_sep_dir) - len(modified_images),
-            addedByUser=len(added_by_user),
-            separatedByUser=len(modified_images) - len(cleared_images),
-            clearedByUser=len(cleared_images),
+            untouchedByUser=len(unmodified_images),
+            createdByUser=len(created_by_user),
+            modifiedByUser=len(modified_by_user),
+            clearedByUser=len(cleared_by_user),
+            details=details,
         )
         result.append(stats_for_scan)
 

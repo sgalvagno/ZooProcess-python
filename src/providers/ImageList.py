@@ -37,7 +37,7 @@ class ImageList:
 
     def _load_images(self) -> None:
         """
-        Load all PNG images from the directory and store them internally.
+        Load all image names from the directory and store them internally.
         Images are sorted by name to ensure consistent ordering.
         """
         if not self.directory_path.exists() or not self.directory_path.is_dir():

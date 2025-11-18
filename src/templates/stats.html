@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZooProcess - Stats</title>
+    <link rel="stylesheet" href="/static/ui.css">
+    <style>
+        .content { margin-top: 20px; }
+        .form-row { margin: 12px 0; }
+        .random-box {
+            margin-top: 20px;
+            padding: 12px 16px;
+            background: #f6f8fb;
+            border: 1px solid #dde3ee;
+            border-radius: 6px;
+        }
+        .submit-hidden { display: none; }
+        select { min-width: 320px; }
+    </style>
+    <script>
+        function autoSubmit(sel) {
+            if (sel && sel.value) {
+                sel.form.submit();
+            }
+        }
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Project Stats</h1>
+        </header>
+
+        <div class="user-info">
+            <h2>User</h2>
+            <p>Name: {{ user.name }}</p>
+            <p>Email: {{ user.email }}</p>
+            <a href="/ui/logout" class="logout-btn">Logout</a>
+        </div>
+
+        <div class="content">
+            <h2>Select a project</h2>
+            <form action="/ui/stats" method="post">
+                <div class="form-row">
+                    <label for="project_hash"><strong>Project</strong></label><br>
+                    <select id="project_hash" name="project_hash" onchange="autoSubmit(this)">
+                        <option value="">-- Choose a project --</option>
+                        {% for prj in projects %}
+                            <option value="{{ prj.hash }}" {% if selected_project_hash == prj.hash %}selected{% endif %}>{{ prj.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="submit-hidden">Submit</button>
+            </form>
+
+            {% if selected_project_hash %}
+                <div class="random-box">
+                    {% if stats %}
+                        <ul>
+                            {% for item in stats %}
+                                <li>{{ item }}</li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p>No stats available.</p>
+                    {% endif %}
+                </div>
+            {% endif %}
+
+            <div style="margin-top: 24px;">
+                <a href="/ui/" class="home-link">Back to Home</a>
+            </div>
+        </div>
+
+        <footer>
+            <p>&copy; 2024 ZooProcess. All rights reserved.</p>
+        </footer>
+    </div>
+</body>
+</html>
