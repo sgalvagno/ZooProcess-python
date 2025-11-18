@@ -16,6 +16,7 @@ from helpers.paths import count_files_in_dir
 from legacy.ids import measure_file_name
 from modern.filesystem import ModernScanFileSystem
 from modern.ids import THE_SCAN_PER_SUBSAMPLE, scan_name_from_subsample_name
+from modern.jobs import MIN_SCORE, BIG_IMAGE_THRESHOLD
 from modern.tasks import Job
 from providers.ImageList import ImageList
 from providers.ML_multiple_classifier import (
@@ -72,7 +73,7 @@ class VignettesToAutoSeparated(Job):
         self.logger.info(f"Determining multiples")
         # First ML step, send all images to the multiple classifier
         maybe_multiples, error = classify_all_images_from(
-            self.logger, self.cut_dir, self.scores_file, 0.4
+            self.logger, self.cut_dir, self.scores_file, MIN_SCORE, BIG_IMAGE_THRESHOLD
         )
         assert error is None, error
 

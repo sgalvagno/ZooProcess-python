@@ -6,6 +6,7 @@ from ZooProcess_lib.Processor import Processor
 from ZooProcess_lib.ZooscanFolder import ZooscanProjectFolder
 from modern.filesystem import ModernScanFileSystem
 from modern.ids import scan_name_from_subsample_name
+from modern.jobs import MIN_SCORE, BIG_IMAGE_THRESHOLD
 from modern.jobs.VignettesToAutoSep import (
     convert_scan_and_backgrounds,
     get_scan_and_backgrounds,
@@ -102,7 +103,7 @@ class FreshScanToVignettes(Job):
         # Multiples classification
         self.logger.info(f"Classifying thumbnails")
         maybe_multiples, error = classify_all_images_from(
-            self.logger, cut_dir, self.scores_file, 0.4
+            self.logger, cut_dir, self.scores_file, MIN_SCORE, BIG_IMAGE_THRESHOLD
         )
         self.logger.info(f"Found {len(maybe_multiples)} multiples")
         assert error is None, error

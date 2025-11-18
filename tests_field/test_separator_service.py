@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from modern.jobs import MIN_SCORE, BIG_IMAGE_THRESHOLD
+
 os.environ["APP_ENV"] = "dev"
 import config_rdr
 from helpers.logger import logger
@@ -66,7 +68,7 @@ def test_separate_auto_directory_with_various_images(scan_dir):
     ]  # Largest images, fails on my GPU
     all_grey_jpgs = very_large_jpgs + [e for e in all_grey_jpgs if quite_large not in e]
     maybe_multiples, error = classify_all_images_from(
-        logger, subsample_dir, 0.4, image_list=all_grey_jpgs
+        logger, subsample_dir, MIN_SCORE, BIG_IMAGE_THRESHOLD, image_list=all_grey_jpgs
     )
     to_sep = [mm.name for mm in maybe_multiples]
     a_chunk = ImageList(subsample_dir, to_sep)

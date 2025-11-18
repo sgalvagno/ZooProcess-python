@@ -48,6 +48,7 @@ def test_mark_ML_separation_done():
         fs = ModernScanFileSystem(
             project, sample_name="Sample1", subsample_name="Sample1_sub1"
         )
+        fs.multiples_vis_dir.mkdir(parents=True, exist_ok=True)
 
         # Call the method to test
         fs.mark_ML_separation_done()

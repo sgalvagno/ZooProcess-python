@@ -1,5 +1,4 @@
 import csv
-import os
 from datetime import datetime
 from logging import getLogger
 from pathlib import Path
@@ -19,6 +18,10 @@ from ZooProcess_lib.ZooscanFolder import (
     WRK_MEAS,
     WRK_TSV,
 )
+import os
+
+os.environ["APP_ENV"] = "dev"
+
 from helpers.tools import read_ecotaxa_tsv
 
 HERE = Path(__file__).parent

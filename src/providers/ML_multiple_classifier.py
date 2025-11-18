@@ -25,6 +25,7 @@ def classify_all_images_from(
     img_path: Path,
     scores_path: Path,
     min_score: float,
+    max_image_size: int,
     image_names: Optional[List[str]] = None,
 ) -> Tuple[List[NameAndScore], Optional[str]]:
     """
@@ -36,6 +37,7 @@ def classify_all_images_from(
     Args:
         logger: Logger instance
         min_score: Minimum classification score, images above this score are discarded
+        max_image_size: Do not send to classifier images larger than this size
         img_path: Directory containing the images
         scores_path: Pickle file containing the score for each image
         image_names: Only use specified images, by file name. If not provided, all PNGs in img_path are used
@@ -66,7 +68,7 @@ def classify_all_images_from(
     above_threshold = [
         NameAndScore(name, score)
         for name, score in all_scores.items()
-        if score > min_score and image_list.size_by_name[name] < 2_000_000
+        if score > min_score and image_list.size_by_name[name] < max_image_size
     ]
 
     with open(scores_path, "w") as scores_file:
