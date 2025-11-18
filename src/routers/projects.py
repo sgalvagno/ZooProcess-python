@@ -1,13 +1,17 @@
+import json
 import tempfile
 from pathlib import Path
 from typing import List
 
+import cv2
+import numpy as np
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from Models import Project, Background, Scan
+from Models import Project, Background, Scan, ScanStats
 from ZooProcess_lib.ZooscanFolder import ZooscanDrive
+from ZooProcess_lib.img_tools import load_image
 from config_rdr import config
 from helpers.auth import get_current_user_from_credentials
 from helpers.logger import logger
@@ -16,12 +20,15 @@ from img_proc.convert import convert_tiff_to_jpeg
 from legacy.backgrounds import find_final_background_file, find_raw_background_file
 from legacy_to_remote.importe import import_old_project
 from local_DB.db_dependencies import get_db
+from modern.filesystem import TOP_V10_DIR, ModernScanFileSystem
 from modern.from_legacy import (
     project_from_legacy,
     backgrounds_from_legacy_project,
     scans_from_legacy_project,
     DEPTH_ALL,
 )
+from modern.ids import subsample_name_from_scan_name
+from providers.ML_multiple_separator import RGB_RED_COLOR, BGR_RED_COLOR
 from remote.DB import DB
 from .utils import validate_path_components
 
@@ -166,6 +173,69 @@ def get_scans(
     logger.info(f"Getting scans for project {zoo_project.name}")
 
     return scans_from_legacy_project(db, zoo_project)
+
+
+@router.get("/{project_hash}/stats")
+def get_project_scanning_stats(
+    project_hash: str,
+    _user=Depends(get_current_user_from_credentials),
+    db: Session = Depends(get_db),
+) -> List[ScanStats]:
+    zoo_drive, zoo_project, _, _ = validate_path_components(db, project_hash)
+
+    result: List[ScanStats] = []
+
+    def files_in_dir(path: Path) -> List[Path]:
+        return [a_file for a_file in path.iterdir() if a_file.is_file()]
+
+    def is_after(path: Path, path_cmp: Path) -> bool:
+        return path.stat().st_mtime > path_cmp.stat().st_mtime
+
+    def has_a_separator(image_path: Path) -> bool:
+        sep_img = load_image(image_path, cv2.IMREAD_COLOR_BGR)
+        return np.any(np.all(sep_img == BGR_RED_COLOR, axis=2))
+
+    v10_work_dir: Path = zoo_project.zooscan_scan.path / TOP_V10_DIR
+    if not v10_work_dir.exists():
+        return result
+    for scan_dir in v10_work_dir.iterdir():
+        subsample = subsample_name_from_scan_name(scan_dir.name)
+        modern_fs = ModernScanFileSystem(zoo_project, "", subsample)
+        # We need output directories...
+        nb_subdirs = 1 if modern_fs.cut_dir.exists() else 0
+        nb_subdirs += 1 if modern_fs.multiples_vis_dir.exists() else 0
+        if nb_subdirs != 2:
+            continue
+        # ...and the flag that manual separation is finished
+        if not modern_fs.SEP_validated_file_path.exists():
+            continue
+        after_seg = len(files_in_dir(modern_fs.cut_dir))
+        with open(modern_fs.scores_file_path, "r") as f:
+            scores = json.load(f)
+        sent_to_ml_separator = {k: v for k, v in scores.items() if v > 0.4}
+
+        # Separation work directory. Written into by ML or user
+        in_sep_dir = files_in_dir(modern_fs.multiples_vis_dir)
+        # Writes of images in work dir
+        auto_sep_log = modern_fs.ensure_meta_dir() / "auto_sep_job.log"
+        modified_images = [f for f in in_sep_dir if is_after(f, auto_sep_log)]
+        modified_images_names = [f.name for f in modified_images]
+        # Images added by user but the ML classifier did not see them
+        added_by_user = set(modified_images_names).difference(sent_to_ml_separator)
+        # Writes of a separator-less image
+        cleared_images = [f for f in modified_images if not has_a_separator(f)]
+        stats_for_scan = ScanStats(
+            name=subsample,
+            segmented=after_seg,
+            sentToSeparator=len(sent_to_ml_separator),
+            untouchedByUser=len(in_sep_dir) - len(modified_images),
+            addedByUser=len(added_by_user),
+            separatedByUser=len(modified_images) - len(cleared_images),
+            clearedByUser=len(cleared_images),
+        )
+        result.append(stats_for_scan)
+
+    return result
 
 
 @router.get("/{project_hash}/background/{background_id}")

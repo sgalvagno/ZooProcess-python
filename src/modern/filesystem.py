@@ -185,7 +185,11 @@ class ModernScanFileSystem:
         self.ensure_meta_dir()
         event_date = datetime.now()
         with open(self.SEP_generated_file_path, "w") as f:
-            f.write(event_date.strftime("%Y-%m-%d %H:%M:%S"))
+            f.write(event_date.strftime("%Y-%m-%d %H:%M:%S") + "\n")
+            # Dump content of multiples directory after ML separation
+            for a_file in self.multiples_vis_dir.iterdir():
+                if a_file.is_file():
+                    f.write(a_file.name + "\n")
 
     def mark_SEP_validated(self, event_date: datetime):
         self.ensure_meta_dir()

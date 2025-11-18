@@ -217,6 +217,22 @@ class ScanTypeEnum(str, Enum):
     V10_MASK = "V10MASK"
 
 
+class ScanStats(BaseModel):
+    name: str
+    # Number of images output by segmenter, sent to ML classifier
+    segmented: int
+    # Number of images sent to ML separator, i.e., with ML classifier score > 0.4 and not too large
+    sentToSeparator: int
+    # Number of ML-separated images not modified by users
+    untouchedByUser: int
+    # Number of images modified by users but never sent to ML separator
+    addedByUser: int
+    # Number of (re-)separated images modified by users (but not cleared)
+    separatedByUser: int
+    # Number of (re-)separated images cleared by users
+    clearedByUser: int
+
+
 class ScanPostRsp(BaseModel):
     id: str
     image: str
